@@ -57,17 +57,14 @@ export interface CompetitorChannelData {
 }
 
 function formatDurationISO(durationStr: string): string {
-  if (!durationStr) return '00:00';
+  if (!durationStr) return '00:00:00';
   const match = durationStr.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
   if (!match) return durationStr;
   const hours = parseInt(match[1] || '0', 10);
   const minutes = parseInt(match[2] || '0', 10);
   const seconds = parseInt(match[3] || '0', 10);
 
-  if (hours > 0) {
-    return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-  }
-  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
 function formatDateTimeLocal(isoDate: string): string {
@@ -407,11 +404,18 @@ async function fetchVideoDataScrape(videoId: string): Promise<CompetitorVideoDat
   };
 }
 
+export const maxDuration = 60; // Izinkan hingga 60 detik di Vercel Serverless Function
+export const dynamic = 'force-dynamic';
+
 // Fetch single video details (tags, exact publish date, category, duration, likes, comments)
 async function fetchVideoRowDetails(videoId: string, titleHint = ''): Promise<ChannelVideoRow> {
   const url = `https://www.youtube.com/watch?v=${videoId}`;
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000); // 4 detik max per video
+
     const res = await fetch(url, {
+      signal: controller.signal,
       headers: {
         'User-Agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -419,6 +423,7 @@ async function fetchVideoRowDetails(videoId: string, titleHint = ''): Promise<Ch
       },
       cache: 'no-store',
     });
+    clearTimeout(timeoutId);
 
     if (!res.ok) {
       return {
@@ -427,7 +432,7 @@ async function fetchVideoRowDetails(videoId: string, titleHint = ''): Promise<Ch
         title: titleHint || videoId,
         thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
         publishTimeLocal: '-',
-        duration: '-',
+        duration: '00:00',
         category: 'Music / Umum',
         viewCount: '-',
         likeCount: '-',
@@ -444,38 +449,77 @@ async function fetchVideoRowDetails(videoId: string, titleHint = ''): Promise<Ch
     const titleMatch = html.match(/<meta name="title" content="([^"]*)">/i) || html.match(/<title>([^<]*)<\/title>/i);
     if (titleMatch) title = titleMatch[1].replace(' - YouTube', '').trim();
 
+    // 1. Publish date
+    let publishTimeLocal = '-';
     const dp = html.match(/<meta itemprop="datePublished" content="([^"]+)"/i) ||
                html.match(/<meta itemprop="uploadDate" content="([^"]+)"/i) ||
                html.match(/"publishDate":"([^"]+)"/i);
-    const publishTimeLocal = dp ? formatDateTimeLocal(dp[1]) : '-';
+    if (dp) publishTimeLocal = formatDateTimeLocal(dp[1]);
 
+    // 2. Duration
+    let duration = '00:00:00';
     const dur = html.match(/<meta itemprop="duration" content="([^"]+)"/i);
-    const duration = dur ? formatDurationISO(dur[1]) : '00:00';
+    if (dur) duration = formatDurationISO(dur[1]);
 
+    // 3. Category
+    let category = 'Music / Umum';
     const cat = html.match(/"category":"([^"]+)"/i);
-    const category = cat ? cat[1] : 'Music / Umum';
+    if (cat) category = cat[1];
 
+    // 4. View count
+    let viewCount = '-';
     const views = html.match(/<meta itemprop="interactionCount" content="([^"]+)"/i) || html.match(/"viewCount":"([^"]+)"/i);
-    const viewCount = views ? Number(views[1]).toLocaleString('id-ID') : '-';
+    if (views) viewCount = Number(views[1]).toLocaleString('id-ID');
 
+    // 5. Likes
+    let likeCount = '-';
     const likes = html.match(/"likeCount":"(\d+)"/i) || html.match(/"defaultText":\{"accessibility":\{"accessibilityData":\{"label":"([0-9,.]+)\s+likes?"\}\}/i);
-    const likeCount = likes ? Number(likes[1].replace(/,/g, '')).toLocaleString('id-ID') : '-';
+    if (likes) likeCount = Number(likes[1].replace(/,/g, '')).toLocaleString('id-ID');
 
+    // 6. Comments
+    let commentCount = '-';
     const comments = html.match(/"commentCount":\{"simpleText":"([0-9,.]+)"\}/i) || html.match(/"commentsCount":\{"simpleText":"([0-9,.]+)"\}/i);
-    const commentCount = comments ? comments[1] : '-';
+    if (comments) commentCount = comments[1];
 
-    const keywords = html.match(/<meta name="keywords" content="([^"]+)"/i);
+    // 7. Tags (keywords)
     let tagsStr = '-';
     let tagsArray: string[] = [];
+    const keywords = html.match(/<meta name="keywords" content="([^"]+)"/i);
     if (keywords && keywords[1]) {
       tagsArray = keywords[1].split(',').map((t) => t.trim()).filter(Boolean);
       tagsStr = tagsArray.join(', ');
     }
 
+    // 8. Cek ytInitialPlayerResponse jika ada data yang masih kosong
+    const m_pr = html.match(/ytInitialPlayerResponse\s*=\s*({.*?});/);
+    if (m_pr) {
+      try {
+        const pr = JSON.parse(m_pr[1]);
+        const vd = pr.videoDetails || {};
+        const micro = pr.microformat?.playerMicroformatRenderer || {};
+
+        if (!title || title === videoId) title = vd.title || title;
+        if (viewCount === '-' && vd.viewCount) viewCount = Number(vd.viewCount).toLocaleString('id-ID');
+        if ((duration === '00:00' || duration === '00:00:00') && vd.lengthSeconds) {
+          const s = parseInt(vd.lengthSeconds, 10);
+          const hrs = Math.floor(s / 3600);
+          const mins = Math.floor((s % 3600) / 60);
+          const secs = s % 60;
+          duration = `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+        if (publishTimeLocal === '-' && micro.publishDate) publishTimeLocal = formatDateTimeLocal(micro.publishDate);
+        if (category === 'Music / Umum' && micro.category) category = micro.category;
+        if (tagsStr === '-' && vd.keywords && vd.keywords.length > 0) {
+          tagsArray = vd.keywords;
+          tagsStr = tagsArray.join(', ');
+        }
+      } catch {}
+    }
+
     return {
       videoId,
       url,
-      title,
+      title: title || videoId,
       thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
       publishTimeLocal,
       duration,
@@ -494,7 +538,7 @@ async function fetchVideoRowDetails(videoId: string, titleHint = ''): Promise<Ch
       title: titleHint || videoId,
       thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
       publishTimeLocal: '-',
-      duration: '-',
+      duration: '00:00:00',
       category: 'Music / Umum',
       viewCount: '-',
       likeCount: '-',
@@ -537,7 +581,7 @@ async function fetchChannelWithVideosTable(channelQuery: string): Promise<Compet
   const html = await res.text();
 
   // 1. Ambil video-video terbaru dari halaman /videos
-  const videoIdsWithTitles: { id: string; title: string }[] = [];
+  const videoItems: { id: string; title: string; initialViews: string; initialTime: string }[] = [];
   const m = html.match(/var ytInitialData\s*=\s*({.*?});<\/script>/);
 
   if (m) {
@@ -545,24 +589,33 @@ async function fetchChannelWithVideosTable(channelQuery: string): Promise<Compet
       const data = JSON.parse(m[1]);
       const tabs = data?.contents?.twoColumnBrowseResultsRenderer?.tabs || [];
       for (const t of tabs) {
-        const tabRen = t?.tabRenderer;
-        if (tabRen?.selected) {
-          const contents = tabRen?.content?.richGridRenderer?.contents || [];
+        const contents = t?.tabRenderer?.content?.richGridRenderer?.contents || [];
+        if (contents.length > 0) {
           for (const item of contents) {
             const rir = item?.richItemRenderer?.content;
             const lvm = rir?.lockupViewModel;
             if (lvm?.contentId) {
               const vidId = lvm.contentId;
               const title = lvm?.metadata?.lockupMetadataViewModel?.title?.content || '';
-              if (!videoIdsWithTitles.some((v) => v.id === vidId)) {
-                videoIdsWithTitles.push({ id: vidId, title });
+              const rows = lvm?.metadata?.lockupMetadataViewModel?.metadata?.contentMetadataViewModel?.metadataRows || [];
+              let views = '';
+              let time = '';
+              if (rows.length > 0) {
+                const parts = rows[0]?.metadataParts || [];
+                if (parts[0]?.text?.content) views = parts[0].text.content;
+                if (parts[1]?.text?.content) time = parts[1].text.content;
+              }
+              if (!videoItems.some((v) => v.id === vidId)) {
+                videoItems.push({ id: vidId, title, initialViews: views, initialTime: time });
               }
             } else if (rir?.videoRenderer?.videoId) {
               const vr = rir.videoRenderer;
               const vidId = vr.videoId;
               const title = vr?.title?.runs?.[0]?.text || '';
-              if (!videoIdsWithTitles.some((v) => v.id === vidId)) {
-                videoIdsWithTitles.push({ id: vidId, title });
+              const views = vr?.viewCountText?.simpleText || '';
+              const time = vr?.publishedTimeText?.simpleText || '';
+              if (!videoItems.some((v) => v.id === vidId)) {
+                videoItems.push({ id: vidId, title, initialViews: views, initialTime: time });
               }
             }
           }
@@ -572,12 +625,12 @@ async function fetchChannelWithVideosTable(channelQuery: string): Promise<Compet
   }
 
   // Fallback regex jika parser JSON tidak menemukan
-  if (videoIdsWithTitles.length === 0) {
+  if (videoItems.length === 0) {
     const rawMatches = Array.from(new Set(html.match(/\/watch\?v=([a-zA-Z0-9_-]{11})/g) || []));
     for (const rm of rawMatches) {
       const id = rm.replace('/watch?v=', '');
-      if (!videoIdsWithTitles.some((v) => v.id === id)) {
-        videoIdsWithTitles.push({ id, title: '' });
+      if (!videoItems.some((v) => v.id === id)) {
+        videoItems.push({ id, title: '', initialViews: '', initialTime: '' });
       }
     }
   }
@@ -585,10 +638,17 @@ async function fetchChannelWithVideosTable(channelQuery: string): Promise<Compet
   // 2. Ambil data about channel secara akurat
   const aboutData = await fetchChannelFullMetadata(targetUrl.replace('/videos', ''));
 
-  // 3. Ambil data baris tabel untuk hingga 25 video terbaru secara paralel
-  const topVideos = videoIdsWithTitles.slice(0, 25);
+  // 3. Batasi 15 video agar proses scraping di Vercel sangat cepat (< 5 detik) dan data terisi penuh
+  const topVideos = videoItems.slice(0, 15);
   const videoRows: ChannelVideoRow[] = await Promise.all(
-    topVideos.map((v) => fetchVideoRowDetails(v.id, v.title))
+    topVideos.map(async (v) => {
+      const details = await fetchVideoRowDetails(v.id, v.title);
+      // Jika view count dari watch page kosong, pakai view count dari thumbnail
+      if (details.viewCount === '-' && v.initialViews) {
+        details.viewCount = v.initialViews;
+      }
+      return details;
+    })
   );
 
   return {
