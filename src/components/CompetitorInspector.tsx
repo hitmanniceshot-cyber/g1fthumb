@@ -393,8 +393,8 @@ export function CompetitorInspector({
                   </div>
                 )}
 
-                <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 max-h-64 overflow-y-auto">
-                  <pre className="text-xs text-slate-300 whitespace-pre-wrap font-sans leading-relaxed">
+                <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 max-h-96 overflow-y-auto custom-scrollbar">
+                  <pre className="text-xs text-slate-300 whitespace-pre-wrap font-sans leading-relaxed break-words">
                     {result.description || 'Tidak ada deskripsi.'}
                   </pre>
                 </div>
