@@ -565,6 +565,7 @@ async function fetchVideoRowDetails(
   }
 
   // METODE 3: Fallback ke HTML Watch Page jika tag/like masih belum lengkap
+  // Menggunakan User-Agent Googlebot yang tidak pernah diblokir atau diberi bot wall oleh YouTube di server datacenter Vercel
   if (tagsArray.length === 0 || likeCount === '-' || publishTimeLocal === '-') {
     try {
       const controller = new AbortController();
@@ -573,8 +574,7 @@ async function fetchVideoRowDetails(
       const res = await fetch(url, {
         signal: controller.signal,
         headers: {
-          'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
           'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
         },
         cache: 'no-store',
@@ -583,6 +583,29 @@ async function fetchVideoRowDetails(
 
       if (res.ok) {
         const html = await res.text();
+
+        // Tags asli dari <meta property="og:video:tag" content="...">
+        if (tagsArray.length === 0) {
+          const ogTags = [...html.matchAll(/<meta property="og:video:tag" content="([^"]+)">/gi)].map((m) => m[1].trim()).filter(Boolean);
+          if (ogTags.length > 0) {
+            tagsArray = Array.from(new Set(ogTags));
+            tagsStr = tagsArray.join(', ');
+          }
+        }
+
+        // Tags asli dari regex "keywords":[...]
+        if (tagsArray.length === 0) {
+          const km = html.match(/"keywords":(\[.*?\])/);
+          if (km) {
+            try {
+              const parsedK = JSON.parse(km[1]);
+              if (Array.isArray(parsedK) && parsedK.length > 0) {
+                tagsArray = parsedK;
+                tagsStr = tagsArray.join(', ');
+              }
+            } catch {}
+          }
+        }
 
         if (!title || title === videoId) {
           const titleMatch = html.match(/<meta name="title" content="([^"]*)">/i) || html.match(/<title>([^<]*)<\/title>/i);
@@ -624,29 +647,6 @@ async function fetchVideoRowDetails(
         if (commentCount === '-') {
           const comments = html.match(/"commentCount":\{"simpleText":"([0-9,.]+)"\}/i) || html.match(/"commentsCount":\{"simpleText":"([0-9,.]+)"\}/i);
           if (comments) commentCount = comments[1];
-        }
-
-        // Tags asli dari <meta property="og:video:tag" content="...">
-        if (tagsArray.length === 0) {
-          const ogTags = [...html.matchAll(/<meta property="og:video:tag" content="([^"]+)">/gi)].map((m) => m[1].trim()).filter(Boolean);
-          if (ogTags.length > 0) {
-            tagsArray = Array.from(new Set(ogTags));
-            tagsStr = tagsArray.join(', ');
-          }
-        }
-
-        // Tags asli dari regex "keywords":[...]
-        if (tagsArray.length === 0) {
-          const km = html.match(/"keywords":(\[.*?\])/);
-          if (km) {
-            try {
-              const parsedK = JSON.parse(km[1]);
-              if (Array.isArray(parsedK) && parsedK.length > 0) {
-                tagsArray = parsedK;
-                tagsStr = tagsArray.join(', ');
-              }
-            } catch {}
-          }
         }
       }
     } catch {}
