@@ -198,6 +198,7 @@ async function fetchChannelFullMetadata(channelQueryOrUrl: string) {
 
       if (data) {
         try {
+
           // 1. Ekstrak Total Video & Subs dari Header PageHeaderViewModel
           const vm = data?.header?.pageHeaderRenderer?.content?.pageHeaderViewModel;
           const metaRows = vm?.metadata?.contentMetadataViewModel?.metadataRows || [];
@@ -213,6 +214,7 @@ async function fetchChannelFullMetadata(channelQueryOrUrl: string) {
           }
 
           // 2. Ekstrak Tanggal Bergabung (Bergabung Pada ...)
+          // Cari joinedDateText
           const findKey = (obj: any, key: string): any => {
             if (!obj || typeof obj !== 'object') return null;
             if (key in obj) return obj[key];
@@ -262,6 +264,7 @@ async function fetchChannelFullMetadata(channelQueryOrUrl: string) {
             else if (vt?.content) str = vt.content;
 
             if (str && (str.includes('x ditonton') || str.includes('views'))) {
+              // Ambil view yang bukan dari thumbnail rekomendasi kecil (biasanya angka terbesar / channel view)
               channelTotalViews = str;
             }
           }
