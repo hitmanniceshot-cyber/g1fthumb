@@ -303,69 +303,153 @@ async function fetchChannelFullMetadata(channelQueryOrUrl: string) {
   };
 }
 
-// Scraping single video
+// Scraping single video menggunakan Innertube MWEB + Googlebot fallback (Lolos filter Vercel & ambil full description)
 async function fetchVideoDataScrape(videoId: string): Promise<CompetitorVideoData> {
   const url = `https://www.youtube.com/watch?v=${videoId}`;
-  const res = await fetch(url, {
-    headers: {
-      'User-Agent':
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-      'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
-    },
-    cache: 'no-store',
-  });
-
-  if (!res.ok) {
-    throw new Error('Gagal mengakses video YouTube.');
-  }
-
-  const html = await res.text();
-
   let title = '';
-  const titleMatch = html.match(/<meta name="title" content="([^"]*)">/i) || html.match(/<title>([^<]*)<\/title>/i);
-  if (titleMatch) {
-    title = titleMatch[1].replace(' - YouTube', '').trim();
-  }
-
   let description = '';
-  const descMatch = html.match(/<meta property="og:description" content="([^"]*)">/i) ||
-                    html.match(/<meta name="description" content="([^"]*)">/i);
-  if (descMatch) {
-    description = descMatch[1].replace(/\\n/g, '\n').trim();
-  }
-
   let tags: string[] = [];
-  const keywordsMatch = html.match(/<meta name="keywords" content="([^"]*)">/i);
-  if (keywordsMatch && keywordsMatch[1]) {
-    tags = keywordsMatch[1].split(',').map((t) => t.trim()).filter(Boolean);
-  }
-
   let channelTitle = '';
   let channelUrl = '';
-  const channelNameMatch = html.match(/<link itemprop="name" content="([^"]*)">/i) || html.match(/"ownerChannelName":"([^"]*)"/i);
-  if (channelNameMatch) channelTitle = channelNameMatch[1];
-
-  const channelUrlMatch = html.match(/<span itemprop="author"[\s\S]*?<link itemprop="url" href="([^"]*)">/i) || html.match(/"channelUrl":"([^"]*)"/i);
-  if (channelUrlMatch) channelUrl = channelUrlMatch[1];
-
   let uploadDate = '';
-  const dateMatch = html.match(/<meta itemprop="datePublished" content="([^"]*)">/i) ||
-                    html.match(/<meta itemprop="uploadDate" content="([^"]*)">/i) ||
-                    html.match(/"publishDate":"([^"]*)"/i);
-  if (dateMatch) uploadDate = dateMatch[1];
-
   let category = 'Umum';
-  const categoryMatch = html.match(/"category":"([^"]*)"/i) || html.match(/<meta property="og:video:tag" content="([^"]*)">/i);
-  if (categoryMatch) category = categoryMatch[1];
+  let views = '0';
+  let uploadTimeFormatted = 'Tidak terdeteksi';
+  let uploadDayFormatted = 'Tidak terdeteksi';
+  let channelSubscriberCount = 'Tidak ditampilkan';
+
+  // 1. Ambil data primer dari Innertube MWEB Player API
+  try {
+    const pController = new AbortController();
+    const pTimeout = setTimeout(() => pController.abort(), 5000);
+
+    const pRes = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+      method: 'POST',
+      signal: pController.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent':
+          'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+        'X-YouTube-Client-Name': '2',
+        'X-YouTube-Client-Version': '2.20240101.01.00',
+        'Origin': 'https://m.youtube.com',
+        'Referer': `https://m.youtube.com/watch?v=${videoId}`,
+      },
+      body: JSON.stringify({
+        videoId,
+        context: {
+          client: {
+            hl: 'id',
+            gl: 'ID',
+            clientName: 'MWEB',
+            clientVersion: '2.20240101.01.00',
+            originalUrl: `https://m.youtube.com/watch?v=${videoId}`,
+          },
+        },
+      }),
+      cache: 'no-store',
+    });
+    clearTimeout(pTimeout);
+
+    if (pRes.ok) {
+      const pData = await pRes.json();
+      const vd = pData?.videoDetails || {};
+      const micro = pData?.microformat?.playerMicroformatRenderer || {};
+
+      if (vd.title) title = vd.title;
+      if (vd.author) channelTitle = vd.author;
+      if (vd.channelId) channelUrl = `https://www.youtube.com/channel/${vd.channelId}`;
+      if (vd.viewCount) views = Number(vd.viewCount).toLocaleString('id-ID');
+      if (vd.shortDescription) description = vd.shortDescription;
+      if (Array.isArray(vd.keywords) && vd.keywords.length > 0) tags = vd.keywords;
+
+      if (micro.publishDate) uploadDate = micro.publishDate;
+      if (micro.category) category = micro.category;
+    }
+  } catch {}
+
+  // 2. Fallback / Lengkapi data via Googlebot Watch Page (tidak pernah diblokir Vercel)
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+        'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+      },
+      cache: 'no-store',
+    });
+
+    if (res.ok) {
+      const html = await res.text();
+
+      if (!title) {
+        const titleMatch = html.match(/<meta name="title" content="([^"]*)">/i) || html.match(/<title>([^<]*)<\/title>/i);
+        if (titleMatch) title = titleMatch[1].replace(' - YouTube', '').trim();
+      }
+
+      // Ambil deskripsi lengkap jika belum dapat
+      if (!description) {
+        const descFullMatch = html.match(/"description":\{"simpleText":"([^"]*)"\}/i) ||
+                              html.match(/<meta property="og:description" content="([^"]*)">/i);
+        if (descFullMatch) {
+          description = descFullMatch[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').trim();
+        }
+      }
+
+      // Tags dari og:video:tag jika belum dapat
+      if (tags.length === 0) {
+        const ogTags = [...html.matchAll(/<meta property="og:video:tag" content="([^"]+)">/gi)].map((m) => m[1].trim()).filter(Boolean);
+        if (ogTags.length > 0) tags = Array.from(new Set(ogTags));
+      }
+
+      if (tags.length === 0) {
+        const km = html.match(/"keywords":(\[.*?\])/);
+        if (km) {
+          try {
+            const parsedK = JSON.parse(km[1]);
+            if (Array.isArray(parsedK) && parsedK.length > 0) tags = parsedK;
+          } catch {}
+        }
+      }
+
+      if (!channelTitle) {
+        const channelNameMatch = html.match(/<link itemprop="name" content="([^"]*)">/i) || html.match(/"ownerChannelName":"([^"]*)"/i);
+        if (channelNameMatch) channelTitle = channelNameMatch[1];
+      }
+
+      if (!channelUrl) {
+        const channelUrlMatch = html.match(/<span itemprop="author"[\s\S]*?<link itemprop="url" href="([^"]*)">/i) || html.match(/"channelUrl":"([^"]*)"/i);
+        if (channelUrlMatch) channelUrl = channelUrlMatch[1];
+      }
+
+      if (!uploadDate) {
+        const dateMatch = html.match(/<meta itemprop="datePublished" content="([^"]*)">/i) ||
+                          html.match(/<meta itemprop="uploadDate" content="([^"]*)">/i) ||
+                          html.match(/"publishDate":"([^"]*)"/i);
+        if (dateMatch) uploadDate = dateMatch[1];
+      }
+
+      if (category === 'Umum') {
+        const categoryMatch = html.match(/"category":"([^"]*)"/i) || html.match(/<meta property="og:video:tag" content="([^"]*)">/i);
+        if (categoryMatch) category = categoryMatch[1];
+      }
+
+      if (views === '0') {
+        const viewsMatch = html.match(/"viewCount":"([^"]*)"/i) || html.match(/<meta itemprop="interactionCount" content="([^"]*)">/i);
+        if (viewsMatch) views = Number(viewsMatch[1]).toLocaleString('id-ID');
+      }
+
+      const subAccMatch = html.match(/"subscriberCountText":\{"accessibility":\{"accessibilityData":\{"label":"([^"]+)"\}/i);
+      const subSimpleMatch = html.match(/"subscriberCountText":\{.*?"simpleText":"([^"]+)"/i);
+      if (subAccMatch && subAccMatch[1]) {
+        channelSubscriberCount = subAccMatch[1];
+      } else if (subSimpleMatch && subSimpleMatch[1]) {
+        channelSubscriberCount = subSimpleMatch[1];
+      }
+    }
+  } catch {}
 
   const thumbnailUrl = `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
 
-  let views = '0';
-  const viewsMatch = html.match(/"viewCount":"([^"]*)"/i) || html.match(/<meta itemprop="interactionCount" content="([^"]*)">/i);
-  if (viewsMatch) views = Number(viewsMatch[1]).toLocaleString('id-ID');
-
-  let uploadTimeFormatted = 'Tidak terdeteksi';
-  let uploadDayFormatted = 'Tidak terdeteksi';
   if (uploadDate) {
     try {
       const d = new Date(uploadDate);
@@ -375,16 +459,6 @@ async function fetchVideoDataScrape(videoId: string): Promise<CompetitorVideoDat
   }
 
   const hashtags = Array.from(new Set(description.match(/#[a-zA-Z0-9_\u0590-\u05ff\u0600-\u06ff]+/g) || []));
-
-  // Subscriber extraction: cek langsung dari halaman video ini!
-  let channelSubscriberCount = 'Tidak ditampilkan';
-  const subAccMatch = html.match(/"subscriberCountText":\{"accessibility":\{"accessibilityData":\{"label":"([^"]+)"\}/i);
-  const subSimpleMatch = html.match(/"subscriberCountText":\{.*?"simpleText":"([^"]+)"/i);
-  if (subAccMatch && subAccMatch[1]) {
-    channelSubscriberCount = subAccMatch[1];
-  } else if (subSimpleMatch && subSimpleMatch[1]) {
-    channelSubscriberCount = subSimpleMatch[1];
-  }
 
   // Ambil data akurat channel (Total Video, Bergabung Pada, Lokasi)
   let channelCreatedDate = '-';
