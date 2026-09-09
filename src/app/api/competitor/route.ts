@@ -67,6 +67,20 @@ function formatDurationISO(durationStr: string): string {
   return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
+function parseDurationText(text: string): string {
+  if (!text) return '00:00:00';
+  const clean = text.trim().replace(/\./g, ':');
+  const parts = clean.split(':').map((p) => parseInt(p, 10) || 0);
+  if (parts.length === 3) {
+    return `${parts[0].toString().padStart(2, '0')}:${parts[1].toString().padStart(2, '0')}:${parts[2].toString().padStart(2, '0')}`;
+  } else if (parts.length === 2) {
+    return `00:${parts[0].toString().padStart(2, '0')}:${parts[1].toString().padStart(2, '0')}`;
+  } else if (parts.length === 1) {
+    return `00:00:${parts[0].toString().padStart(2, '0')}`;
+  }
+  return '00:00:00';
+}
+
 function formatDateTimeLocal(isoDate: string): string {
   if (!isoDate) return '-';
   try {
@@ -169,12 +183,21 @@ async function fetchChannelFullMetadata(channelQueryOrUrl: string) {
       const countryMatch = html.match(/"country":\{"simpleText":"([^"]*)"\}/i) || html.match(/"country":"([^"]*)"/i);
       if (countryMatch) channelCountry = countryMatch[1];
 
-      // Parse ytInitialData
-      const mData = html.match(/var ytInitialData\s*=\s*({.*?});<\/script>/);
-      if (mData) {
-        try {
-          const data = JSON.parse(mData[1]);
+      // Parse ytInitialData safely without regex
+      let data: any = null;
+      const startIdx = html.indexOf('var ytInitialData = {');
+      if (startIdx !== -1) {
+        const jsonStart = startIdx + 'var ytInitialData = '.length;
+        const endIdx = html.indexOf(';</script>', jsonStart);
+        if (endIdx !== -1) {
+          try {
+            data = JSON.parse(html.substring(jsonStart, endIdx));
+          } catch {}
+        }
+      }
 
+      if (data) {
+        try {
           // 1. Ekstrak Total Video & Subs dari Header PageHeaderViewModel
           const vm = data?.header?.pageHeaderRenderer?.content?.pageHeaderViewModel;
           const metaRows = vm?.metadata?.contentMetadataViewModel?.metadataRows || [];
@@ -190,7 +213,6 @@ async function fetchChannelFullMetadata(channelQueryOrUrl: string) {
           }
 
           // 2. Ekstrak Tanggal Bergabung (Bergabung Pada ...)
-          // Cari joinedDateText
           const findKey = (obj: any, key: string): any => {
             if (!obj || typeof obj !== 'object') return null;
             if (key in obj) return obj[key];
@@ -240,7 +262,6 @@ async function fetchChannelFullMetadata(channelQueryOrUrl: string) {
             else if (vt?.content) str = vt.content;
 
             if (str && (str.includes('x ditonton') || str.includes('views'))) {
-              // Ambil view yang bukan dari thumbnail rekomendasi kecil (biasanya angka terbesar / channel view)
               channelTotalViews = str;
             }
           }
@@ -408,7 +429,12 @@ export const maxDuration = 60; // Izinkan hingga 60 detik di Vercel Serverless F
 export const dynamic = 'force-dynamic';
 
 // Fetch single video details (tags, exact publish date, category, duration, likes, comments)
-async function fetchVideoRowDetails(videoId: string, titleHint = ''): Promise<ChannelVideoRow> {
+async function fetchVideoRowDetails(
+  videoId: string,
+  titleHint = '',
+  initialDuration = '00:00:00',
+  initialViews = '-'
+): Promise<ChannelVideoRow> {
   const url = `https://www.youtube.com/watch?v=${videoId}`;
   try {
     const controller = new AbortController();
@@ -432,9 +458,9 @@ async function fetchVideoRowDetails(videoId: string, titleHint = ''): Promise<Ch
         title: titleHint || videoId,
         thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
         publishTimeLocal: '-',
-        duration: '00:00',
+        duration: initialDuration || '00:00:00',
         category: 'Music / Umum',
-        viewCount: '-',
+        viewCount: initialViews || '-',
         likeCount: '-',
         commentCount: '-',
         totalLanguages: 1,
@@ -457,7 +483,7 @@ async function fetchVideoRowDetails(videoId: string, titleHint = ''): Promise<Ch
     if (dp) publishTimeLocal = formatDateTimeLocal(dp[1]);
 
     // 2. Duration
-    let duration = '00:00:00';
+    let duration = initialDuration || '00:00:00';
     const dur = html.match(/<meta itemprop="duration" content="([^"]+)"/i);
     if (dur) duration = formatDurationISO(dur[1]);
 
@@ -467,7 +493,7 @@ async function fetchVideoRowDetails(videoId: string, titleHint = ''): Promise<Ch
     if (cat) category = cat[1];
 
     // 4. View count
-    let viewCount = '-';
+    let viewCount = initialViews || '-';
     const views = html.match(/<meta itemprop="interactionCount" content="([^"]+)"/i) || html.match(/"viewCount":"([^"]+)"/i);
     if (views) viewCount = Number(views[1]).toLocaleString('id-ID');
 
@@ -490,17 +516,27 @@ async function fetchVideoRowDetails(videoId: string, titleHint = ''): Promise<Ch
       tagsStr = tagsArray.join(', ');
     }
 
-    // 8. Cek ytInitialPlayerResponse jika ada data yang masih kosong
-    const m_pr = html.match(/ytInitialPlayerResponse\s*=\s*({.*?});/);
-    if (m_pr) {
+    // 8. Cek ytInitialPlayerResponse menggunakan safe indexOf (karena string JSON player sangat besar untuk regex V8)
+    let pr: any = null;
+    const prIdx = html.indexOf('ytInitialPlayerResponse = {');
+    if (prIdx !== -1) {
+      const prStart = prIdx + 'ytInitialPlayerResponse = '.length;
+      const prEnd = html.indexOf('};', prStart);
+      if (prEnd !== -1) {
+        try {
+          pr = JSON.parse(html.substring(prStart, prEnd + 1));
+        } catch {}
+      }
+    }
+
+    if (pr) {
       try {
-        const pr = JSON.parse(m_pr[1]);
         const vd = pr.videoDetails || {};
         const micro = pr.microformat?.playerMicroformatRenderer || {};
 
         if (!title || title === videoId) title = vd.title || title;
-        if (viewCount === '-' && vd.viewCount) viewCount = Number(vd.viewCount).toLocaleString('id-ID');
-        if ((duration === '00:00' || duration === '00:00:00') && vd.lengthSeconds) {
+        if ((viewCount === '-' || !viewCount) && vd.viewCount) viewCount = Number(vd.viewCount).toLocaleString('id-ID');
+        if ((duration === '00:00:00' || !duration) && vd.lengthSeconds) {
           const s = parseInt(vd.lengthSeconds, 10);
           const hrs = Math.floor(s / 3600);
           const mins = Math.floor((s % 3600) / 60);
@@ -522,9 +558,9 @@ async function fetchVideoRowDetails(videoId: string, titleHint = ''): Promise<Ch
       title: title || videoId,
       thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
       publishTimeLocal,
-      duration,
+      duration: duration || '00:00:00',
       category,
-      viewCount,
+      viewCount: viewCount || '-',
       likeCount,
       commentCount,
       totalLanguages: 1,
@@ -538,9 +574,9 @@ async function fetchVideoRowDetails(videoId: string, titleHint = ''): Promise<Ch
       title: titleHint || videoId,
       thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
       publishTimeLocal: '-',
-      duration: '00:00:00',
+      duration: initialDuration || '00:00:00',
       category: 'Music / Umum',
-      viewCount: '-',
+      viewCount: initialViews || '-',
       likeCount: '-',
       commentCount: '-',
       totalLanguages: 1,
@@ -580,14 +616,24 @@ async function fetchChannelWithVideosTable(channelQuery: string): Promise<Compet
 
   const html = await res.text();
 
-  // 1. Ambil video-video terbaru dari halaman /videos
-  const videoItems: { id: string; title: string; initialViews: string; initialTime: string }[] = [];
-  const m = html.match(/var ytInitialData\s*=\s*({.*?});<\/script>/);
+  // 1. Ambil video-video terbaru dari halaman /videos dengan indexOf aman (menghindari regex fail pada JSON ratusan KB)
+  const videoItems: { id: string; title: string; initialViews: string; initialTime: string; initialDuration: string }[] = [];
+  
+  let channelData: any = null;
+  const startIdx = html.indexOf('var ytInitialData = {');
+  if (startIdx !== -1) {
+    const jsonStart = startIdx + 'var ytInitialData = '.length;
+    const endIdx = html.indexOf(';</script>', jsonStart);
+    if (endIdx !== -1) {
+      try {
+        channelData = JSON.parse(html.substring(jsonStart, endIdx));
+      } catch {}
+    }
+  }
 
-  if (m) {
+  if (channelData) {
     try {
-      const data = JSON.parse(m[1]);
-      const tabs = data?.contents?.twoColumnBrowseResultsRenderer?.tabs || [];
+      const tabs = channelData?.contents?.twoColumnBrowseResultsRenderer?.tabs || [];
       for (const t of tabs) {
         const contents = t?.tabRenderer?.content?.richGridRenderer?.contents || [];
         if (contents.length > 0) {
@@ -605,8 +651,23 @@ async function fetchChannelWithVideosTable(channelQuery: string): Promise<Compet
                 if (parts[0]?.text?.content) views = parts[0].text.content;
                 if (parts[1]?.text?.content) time = parts[1].text.content;
               }
+
+              // Extract duration dari badge thumbnail
+              let duration = '00:00:00';
+              const overlays =
+                lvm?.contentImage?.thumbnailViewModel?.overlays ||
+                lvm?.contentImage?.collectionThumbnailViewModel?.primaryThumbnail?.thumbnailViewModel?.overlays ||
+                [];
+              for (const o of overlays) {
+                const badge = o?.thumbnailBottomOverlayViewModel?.badges?.[0]?.thumbnailBadgeViewModel;
+                if (badge?.text) {
+                  duration = parseDurationText(badge.text);
+                  break;
+                }
+              }
+
               if (!videoItems.some((v) => v.id === vidId)) {
-                videoItems.push({ id: vidId, title, initialViews: views, initialTime: time });
+                videoItems.push({ id: vidId, title, initialViews: views, initialTime: time, initialDuration: duration });
               }
             } else if (rir?.videoRenderer?.videoId) {
               const vr = rir.videoRenderer;
@@ -614,8 +675,10 @@ async function fetchChannelWithVideosTable(channelQuery: string): Promise<Compet
               const title = vr?.title?.runs?.[0]?.text || '';
               const views = vr?.viewCountText?.simpleText || '';
               const time = vr?.publishedTimeText?.simpleText || '';
+              const durText = vr?.lengthText?.simpleText || '';
+              const duration = durText ? parseDurationText(durText) : '00:00:00';
               if (!videoItems.some((v) => v.id === vidId)) {
-                videoItems.push({ id: vidId, title, initialViews: views, initialTime: time });
+                videoItems.push({ id: vidId, title, initialViews: views, initialTime: time, initialDuration: duration });
               }
             }
           }
@@ -630,7 +693,7 @@ async function fetchChannelWithVideosTable(channelQuery: string): Promise<Compet
     for (const rm of rawMatches) {
       const id = rm.replace('/watch?v=', '');
       if (!videoItems.some((v) => v.id === id)) {
-        videoItems.push({ id, title: '', initialViews: '', initialTime: '' });
+        videoItems.push({ id, title: '', initialViews: '', initialTime: '', initialDuration: '00:00:00' });
       }
     }
   }
@@ -642,10 +705,13 @@ async function fetchChannelWithVideosTable(channelQuery: string): Promise<Compet
   const topVideos = videoItems.slice(0, 15);
   const videoRows: ChannelVideoRow[] = await Promise.all(
     topVideos.map(async (v) => {
-      const details = await fetchVideoRowDetails(v.id, v.title);
+      const details = await fetchVideoRowDetails(v.id, v.title, v.initialDuration, v.initialViews);
       // Jika view count dari watch page kosong, pakai view count dari thumbnail
       if (details.viewCount === '-' && v.initialViews) {
         details.viewCount = v.initialViews;
+      }
+      if ((details.duration === '00:00:00' || !details.duration) && v.initialDuration) {
+        details.duration = v.initialDuration;
       }
       return details;
     })
