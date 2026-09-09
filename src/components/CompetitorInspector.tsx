@@ -88,13 +88,26 @@ export function CompetitorInspector({
     setTimeout(() => setCopiedField(null), 2000);
   };
 
+  // Helper untuk memastikan format durasi selalu 00:00:00 (Jam:Menit:Detik)
+  const formatDurationHMS = (dur: string): string => {
+    if (!dur || dur === '-') return '00:00:00';
+    const parts = dur.trim().split(':');
+    if (parts.length === 2) {
+      return `00:${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}`;
+    }
+    if (parts.length === 3) {
+      return `${parts[0].padStart(2, '0')}:${parts[1].padStart(2, '0')}:${parts[2].padStart(2, '0')}`;
+    }
+    return dur;
+  };
+
   // Export CSV for the table
   const exportToCSV = (videos: ChannelVideoRow[]) => {
     const headers = ['Judul', 'Tanggal Publish Lokal', 'Durasi', 'Kategori', 'View Count', 'Like Count', 'Comment Count', 'Total Languages', 'Tags', 'Video URL'];
     const rows = videos.map((v) => [
       `"${v.title.replace(/"/g, '""')}"`,
       `"${v.publishTimeLocal}"`,
-      `"${v.duration}"`,
+      `"${formatDurationHMS(v.duration)}"`,
       `"${v.category}"`,
       `"${v.viewCount}"`,
       `"${v.likeCount}"`,
@@ -483,7 +496,7 @@ export function CompetitorInspector({
                           </div>
                         </td>
                         <td className="py-2.5 px-3 text-slate-300 whitespace-nowrap">{v.publishTimeLocal}</td>
-                        <td className="py-2.5 px-3 text-slate-300 whitespace-nowrap">{v.duration}</td>
+                        <td className="py-2.5 px-3 text-slate-300 whitespace-nowrap">{formatDurationHMS(v.duration)}</td>
                         <td className="py-2.5 px-3 text-indigo-300 font-sans whitespace-nowrap">{v.category}</td>
                         <td className="py-2.5 px-3 text-white font-bold whitespace-nowrap">{v.viewCount}</td>
                         <td className="py-2.5 px-3 text-emerald-400 whitespace-nowrap">{v.likeCount}</td>
