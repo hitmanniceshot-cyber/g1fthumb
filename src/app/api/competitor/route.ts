@@ -198,7 +198,6 @@ async function fetchChannelFullMetadata(channelQueryOrUrl: string) {
 
       if (data) {
         try {
-
           // 1. Ekstrak Total Video & Subs dari Header PageHeaderViewModel
           const vm = data?.header?.pageHeaderRenderer?.content?.pageHeaderViewModel;
           const metaRows = vm?.metadata?.contentMetadataViewModel?.metadataRows || [];
@@ -214,7 +213,6 @@ async function fetchChannelFullMetadata(channelQueryOrUrl: string) {
           }
 
           // 2. Ekstrak Tanggal Bergabung (Bergabung Pada ...)
-          // Cari joinedDateText
           const findKey = (obj: any, key: string): any => {
             if (!obj || typeof obj !== 'object') return null;
             if (key in obj) return obj[key];
@@ -264,7 +262,6 @@ async function fetchChannelFullMetadata(channelQueryOrUrl: string) {
             else if (vt?.content) str = vt.content;
 
             if (str && (str.includes('x ditonton') || str.includes('views'))) {
-              // Ambil view yang bukan dari thumbnail rekomendasi kecil (biasanya angka terbesar / channel view)
               channelTotalViews = str;
             }
           }
@@ -558,7 +555,7 @@ async function fetchVideoRowDetails(
     return {
       videoId,
       url,
-      title: title || videoId,
+      title: (title && title !== videoId) ? title : (titleHint || videoId),
       thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/mqdefault.jpg`,
       publishTimeLocal,
       duration: duration || '00:00:00',
@@ -709,12 +706,19 @@ async function fetchChannelWithVideosTable(channelQuery: string): Promise<Compet
   const videoRows: ChannelVideoRow[] = await Promise.all(
     topVideos.map(async (v) => {
       const details = await fetchVideoRowDetails(v.id, v.title, v.initialDuration, v.initialViews);
+      // Pastikan judul asli dari channel tidak tertimpa ID video
+      if ((!details.title || details.title === v.id) && v.title) {
+        details.title = v.title;
+      }
       // Jika view count dari watch page kosong, pakai view count dari thumbnail
       if (details.viewCount === '-' && v.initialViews) {
         details.viewCount = v.initialViews;
       }
       if ((details.duration === '00:00:00' || !details.duration) && v.initialDuration) {
         details.duration = v.initialDuration;
+      }
+      if (details.publishTimeLocal === '-' && v.initialTime) {
+        details.publishTimeLocal = v.initialTime;
       }
       return details;
     })
