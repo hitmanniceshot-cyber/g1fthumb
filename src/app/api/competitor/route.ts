@@ -499,33 +499,51 @@ async function fetchVideoRowDetails(
 
     // 5. Likes
     let likeCount = '-';
-    const likes = html.match(/"likeCount":"(\d+)"/i) || html.match(/"defaultText":\{"accessibility":\{"accessibilityData":\{"label":"([0-9,.]+)\s+likes?"\}\}/i);
-    if (likes) likeCount = Number(likes[1].replace(/,/g, '')).toLocaleString('id-ID');
+    const likeBtnMatch = html.match(/likeButtonViewModel.*?"title":"([^"]+)"/);
+    if (likeBtnMatch && likeBtnMatch[1]) {
+      likeCount = likeBtnMatch[1];
+    } else {
+      const likes = html.match(/"likeCount":"?(\d+)"?/i) || html.match(/"defaultText":\{"accessibility":\{"accessibilityData":\{"label":"([0-9,.]+)\s+likes?"\}\}/i);
+      if (likes) likeCount = Number(likes[1].replace(/,/g, '')).toLocaleString('id-ID');
+    }
 
     // 6. Comments
     let commentCount = '-';
     const comments = html.match(/"commentCount":\{"simpleText":"([0-9,.]+)"\}/i) || html.match(/"commentsCount":\{"simpleText":"([0-9,.]+)"\}/i);
     if (comments) commentCount = comments[1];
 
-    // 7. Tags (keywords)
+    // 7. Tags (keywords) - Jangan gunakan meta keywords umum karena itu tag default YouTube ("video, berbagi, ponsel kamera...")
     let tagsStr = '-';
     let tagsArray: string[] = [];
-    const keywords = html.match(/<meta name="keywords" content="([^"]+)"/i);
-    if (keywords && keywords[1]) {
-      tagsArray = keywords[1].split(',').map((t) => t.trim()).filter(Boolean);
-      tagsStr = tagsArray.join(', ');
-    }
 
-    // 8. Cek ytInitialPlayerResponse menggunakan safe indexOf (karena string JSON player sangat besar untuk regex V8)
+    // 8. Cek ytInitialPlayerResponse menggunakan boundary yang tepat
     let pr: any = null;
     const prIdx = html.indexOf('ytInitialPlayerResponse = {');
     if (prIdx !== -1) {
       const prStart = prIdx + 'ytInitialPlayerResponse = '.length;
-      const prEnd = html.indexOf('};', prStart);
+      const scriptEnd = html.indexOf(';</script>', prStart);
+      const varEnd = html.indexOf(';var ', prStart);
+      let prEnd = -1;
+      if (varEnd !== -1 && scriptEnd !== -1) {
+        prEnd = Math.min(varEnd, scriptEnd);
+      } else if (varEnd !== -1) {
+        prEnd = varEnd;
+      } else {
+        prEnd = scriptEnd;
+      }
+
       if (prEnd !== -1) {
         try {
-          pr = JSON.parse(html.substring(prStart, prEnd + 1));
-        } catch {}
+          pr = JSON.parse(html.substring(prStart, prEnd));
+        } catch {
+          // fallback cari kurung kurawal terluar
+          const altEnd = html.indexOf('};', prStart);
+          if (altEnd !== -1) {
+            try {
+              pr = JSON.parse(html.substring(prStart, altEnd + 1));
+            } catch {}
+          }
+        }
       }
     }
 
@@ -545,7 +563,9 @@ async function fetchVideoRowDetails(
         }
         if (publishTimeLocal === '-' && micro.publishDate) publishTimeLocal = formatDateTimeLocal(micro.publishDate);
         if (category === 'Music / Umum' && micro.category) category = micro.category;
-        if (tagsStr === '-' && vd.keywords && vd.keywords.length > 0) {
+        
+        // Tags asli video spesifik dari videoDetails.keywords!
+        if (vd.keywords && vd.keywords.length > 0) {
           tagsArray = vd.keywords;
           tagsStr = tagsArray.join(', ');
         }
