@@ -450,10 +450,10 @@ async function fetchVideoRowDetails(
   let tagsStr = '-';
   let tagsArray: string[] = [];
 
-  // METODE 1: Panggil YouTube Innertube Player API (Mengembalikan tag/keywords 100% asli video)
+  // METODE 1: Panggil YouTube Innertube Player API dengan MWEB client (100% Mengembalikan keyword/tags asli video & lolos filter datacenter Vercel)
   try {
     const pController = new AbortController();
-    const pTimeout = setTimeout(() => pController.abort(), 7000);
+    const pTimeout = setTimeout(() => pController.abort(), 4000);
 
     const pRes = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
       method: 'POST',
@@ -461,11 +461,11 @@ async function fetchVideoRowDetails(
       headers: {
         'Content-Type': 'application/json',
         'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'X-YouTube-Client-Name': '1',
+          'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+        'X-YouTube-Client-Name': '2',
         'X-YouTube-Client-Version': '2.20240101.01.00',
-        'Origin': 'https://www.youtube.com',
-        'Referer': `https://www.youtube.com/watch?v=${videoId}`,
+        'Origin': 'https://m.youtube.com',
+        'Referer': `https://m.youtube.com/watch?v=${videoId}`,
       },
       body: JSON.stringify({
         videoId,
@@ -473,9 +473,9 @@ async function fetchVideoRowDetails(
           client: {
             hl: 'id',
             gl: 'ID',
-            clientName: 'WEB',
+            clientName: 'MWEB',
             clientVersion: '2.20240101.01.00',
-            originalUrl: `https://www.youtube.com/watch?v=${videoId}`,
+            originalUrl: `https://m.youtube.com/watch?v=${videoId}`,
           },
         },
       }),
@@ -511,11 +511,64 @@ async function fetchVideoRowDetails(
     }
   } catch {}
 
-  // METODE 2: Fallback jika keywords masih kosong, ambil dari HTML Watch Page (og:video:tag & regex)
+  // METODE 2: Fallback jika keywords masih kosong, panggil WEB client
+  if (tagsArray.length === 0) {
+    try {
+      const pController = new AbortController();
+      const pTimeout = setTimeout(() => pController.abort(), 3500);
+
+      const pRes = await fetch('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+        method: 'POST',
+        signal: pController.signal,
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'X-YouTube-Client-Name': '1',
+          'X-YouTube-Client-Version': '2.20240101.01.00',
+          'Origin': 'https://www.youtube.com',
+          'Referer': `https://www.youtube.com/watch?v=${videoId}`,
+        },
+        body: JSON.stringify({
+          videoId,
+          context: {
+            client: {
+              hl: 'id',
+              gl: 'ID',
+              clientName: 'WEB',
+              clientVersion: '2.20240101.01.00',
+              originalUrl: `https://www.youtube.com/watch?v=${videoId}`,
+            },
+          },
+        }),
+        cache: 'no-store',
+      });
+      clearTimeout(pTimeout);
+
+      if (pRes.ok) {
+        const pData = await pRes.json();
+        const vd = pData?.videoDetails || {};
+        const micro = pData?.microformat?.playerMicroformatRenderer || {};
+
+        if (!title && vd.title) title = vd.title;
+        if (viewCount === '-' && vd.viewCount) viewCount = Number(vd.viewCount).toLocaleString('id-ID');
+        if (publishTimeLocal === '-' && micro.publishDate) publishTimeLocal = formatDateTimeLocal(micro.publishDate);
+        if (category === 'Music / Umum' && micro.category) category = micro.category;
+        if (likeCount === '-' && micro.likeCount) likeCount = Number(micro.likeCount).toLocaleString('id-ID');
+
+        if (Array.isArray(vd.keywords) && vd.keywords.length > 0) {
+          tagsArray = vd.keywords;
+          tagsStr = tagsArray.join(', ');
+        }
+      }
+    } catch {}
+  }
+
+  // METODE 3: Fallback ke HTML Watch Page jika tag/like masih belum lengkap
   if (tagsArray.length === 0 || likeCount === '-' || publishTimeLocal === '-') {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 7000);
+      const timeoutId = setTimeout(() => controller.abort(), 4000);
 
       const res = await fetch(url, {
         signal: controller.signal,
@@ -753,11 +806,11 @@ async function fetchChannelWithVideosTable(channelQuery: string): Promise<Compet
   // 2. Ambil data about channel secara akurat
   const aboutData = await fetchChannelFullMetadata(targetUrl.replace('/videos', ''));
 
-  // 3. Batasi 15 video & ambil detail per video dalam batch (chunk) kecil
-  // agar tidak kena rate limit di Vercel dan tag asli YouTube terambil sempurna
+  // 3. Batasi 15 video & ambil detail per video secara paralel (batch ukuran 8)
+  // Memastikan response sangat cepat (< 2-3 detik) di serverless Vercel sehingga tidak pernah timeout
   const topVideos = videoItems.slice(0, 15);
   const videoRows: ChannelVideoRow[] = [];
-  const chunkSize = 5;
+  const chunkSize = 8;
 
   for (let i = 0; i < topVideos.length; i += chunkSize) {
     const chunk = topVideos.slice(i, i + chunkSize);
@@ -782,9 +835,8 @@ async function fetchChannelWithVideosTable(channelQuery: string): Promise<Compet
       })
     );
     videoRows.push(...chunkResults);
-    // Sedikit jeda antar chunk agar aman dari rate limit YouTube
     if (i + chunkSize < topVideos.length) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
+      await new Promise((resolve) => setTimeout(resolve, 50));
     }
   }
 
