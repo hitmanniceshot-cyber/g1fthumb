@@ -431,26 +431,6 @@ async function fetchVideoDataScrape(videoId: string): Promise<CompetitorVideoDat
 export const maxDuration = 60; // Izinkan hingga 60 detik di Vercel Serverless Function
 export const dynamic = 'force-dynamic';
 
-// Helper to generate keywords/tags from title if YouTube returns empty
-function generateKeywordsFromTitle(title: string, category: string): string[] {
-  if (!title) return [];
-  const clean = title.replace(/[#|•\-\[\]\(\),.!?:_&]/g, ' ');
-  const words = clean.split(/\s+/).map((w) => w.trim()).filter((w) => w.length > 2);
-  const stopWords = new Set([
-    'the', 'and', 'with', 'for', 'official', 'video', 'music', 'ft', 'feat',
-    'lirik', 'lagu', 'dan', 'yang', 'dari', 'untuk', 'pada', 'full', 'hd', 'audio', 'remaster', 'mv'
-  ]);
-  const tags: string[] = [];
-  for (const w of words) {
-    if (!stopWords.has(w.toLowerCase()) && !tags.includes(w)) {
-      tags.push(w);
-    }
-  }
-  if (category && category !== 'Music / Umum' && !tags.includes(category)) {
-    tags.push(category);
-  }
-  return tags.slice(0, 10);
-}
 
 // Fetch single video details (tags, exact publish date, category, duration, likes, comments)
 async function fetchVideoRowDetails(
@@ -619,14 +599,7 @@ async function fetchVideoRowDetails(
     } catch {}
   }
 
-  // METODE 3: Hanya jika video benar-benar tidak dipasangi tag oleh creator-nya
-  if (tagsArray.length === 0 || tagsStr === '-') {
-    const fallbackTags = generateKeywordsFromTitle(title || titleHint, category);
-    if (fallbackTags.length > 0) {
-      tagsArray = fallbackTags;
-      tagsStr = tagsArray.join(', ');
-    }
-  }
+
 
   return {
     videoId,
