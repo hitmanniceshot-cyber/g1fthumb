@@ -332,9 +332,9 @@ async function fetchVideoDataScrape(videoId: string): Promise<CompetitorVideoDat
   }
 
   let tags: string[] = [];
-  const keywordsMatch = html.match(/<meta name="keywords" content="([^"]*)">/i);
-  if (keywordsMatch && keywordsMatch[1]) {
-    tags = keywordsMatch[1].split(',').map((t) => t.trim()).filter(Boolean);
+  const ogTags = [...html.matchAll(/<meta property="og:video:tag" content="([^"]+)">/gi)].map((m) => m[1].trim()).filter(Boolean);
+  if (ogTags.length > 0) {
+    tags = Array.from(new Set(ogTags));
   }
 
   let channelTitle = '';
@@ -512,9 +512,30 @@ async function fetchVideoRowDetails(
     const comments = html.match(/"commentCount":\{"simpleText":"([0-9,.]+)"\}/i) || html.match(/"commentsCount":\{"simpleText":"([0-9,.]+)"\}/i);
     if (comments) commentCount = comments[1];
 
-    // 7. Tags (keywords) - Jangan gunakan meta keywords umum karena itu tag default YouTube ("video, berbagi, ponsel kamera...")
+    // 7. Tags (keywords) asli video
     let tagsStr = '-';
     let tagsArray: string[] = [];
+
+    // Cara A: Ambil dari meta og:video:tag (Sangat akurat, cepat & ada di HTML YouTube!)
+    const ogTags = [...html.matchAll(/<meta property="og:video:tag" content="([^"]+)">/gi)].map((m) => m[1].trim()).filter(Boolean);
+    if (ogTags.length > 0) {
+      tagsArray = Array.from(new Set(ogTags));
+      tagsStr = tagsArray.join(', ');
+    }
+
+    // Cara B: Regex "keywords":[...] jika og:video:tag belum dapat
+    if (tagsArray.length === 0) {
+      const km = html.match(/"keywords":(\[.*?\])/);
+      if (km) {
+        try {
+          const parsedK = JSON.parse(km[1]);
+          if (Array.isArray(parsedK) && parsedK.length > 0) {
+            tagsArray = parsedK;
+            tagsStr = tagsArray.join(', ');
+          }
+        } catch {}
+      }
+    }
 
     // 8. Cek ytInitialPlayerResponse menggunakan boundary yang tepat
     let pr: any = null;
@@ -564,8 +585,8 @@ async function fetchVideoRowDetails(
         if (publishTimeLocal === '-' && micro.publishDate) publishTimeLocal = formatDateTimeLocal(micro.publishDate);
         if (category === 'Music / Umum' && micro.category) category = micro.category;
         
-        // Tags asli video spesifik dari videoDetails.keywords!
-        if (vd.keywords && vd.keywords.length > 0) {
+        // Tags tambahan dari vd.keywords jika belum terisi
+        if (tagsArray.length === 0 && vd.keywords && vd.keywords.length > 0) {
           tagsArray = vd.keywords;
           tagsStr = tagsArray.join(', ');
         }
