@@ -85,13 +85,21 @@ function formatDateTimeLocal(isoDate: string): string {
   if (!isoDate) return '-';
   try {
     const d = new Date(isoDate);
-    const year = d.getFullYear();
-    const month = (d.getMonth() + 1).toString().padStart(2, '0');
-    const day = d.getDate().toString().padStart(2, '0');
-    const hours = d.getHours().toString().padStart(2, '0');
-    const minutes = d.getMinutes().toString().padStart(2, '0');
-    const seconds = d.getSeconds().toString().padStart(2, '0');
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Jakarta',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).formatToParts(d);
+    const map: Record<string, string> = {};
+    for (const p of parts) {
+      map[p.type] = p.value;
+    }
+    return `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}:${map.second} WIB`;
   } catch {
     return isoDate;
   }
@@ -173,7 +181,14 @@ async function fetchChannelFullMetadata(channelQueryOrUrl: string) {
 
       // Avatar
       const avatarMatch = html.match(/<meta property="og:image" content="([^"]*)">/i);
-      if (avatarMatch) avatarUrl = avatarMatch[1];
+      if (avatarMatch && avatarMatch[1]) {
+        avatarUrl = avatarMatch[1];
+      } else {
+        const dvm = html.match(/"decoratedAvatarViewModel"[\s\S]*?"avatarViewModel"[\s\S]*?"sources":\s*\[\s*\{\s*"url":\s*"([^"]*)"/);
+        const avRegex = html.match(/"avatar":\s*\{\s*"thumbnails":\s*\[\s*\{\s*"url":\s*"([^"]*)"/);
+        if (dvm && dvm[1]) avatarUrl = dvm[1];
+        else if (avRegex && avRegex[1]) avatarUrl = avRegex[1];
+      }
 
       // Description
       const descMatch = html.match(/<meta property="og:description" content="([^"]*)">/i);
@@ -453,8 +468,22 @@ async function fetchVideoDataScrape(videoId: string): Promise<CompetitorVideoDat
   if (uploadDate) {
     try {
       const d = new Date(uploadDate);
-      uploadTimeFormatted = d.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZoneName: 'short' });
-      uploadDayFormatted = d.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+      uploadTimeFormatted =
+        d.toLocaleTimeString('id-ID', {
+          timeZone: 'Asia/Jakarta',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false,
+        }).replace(/\./g, ':') + ' WIB';
+
+      uploadDayFormatted = d.toLocaleDateString('id-ID', {
+        timeZone: 'Asia/Jakarta',
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      });
     } catch {}
   }
 
@@ -914,12 +943,25 @@ async function fetchChannelWithVideosTable(channelQuery: string): Promise<Compet
     }
   }
 
+  let fallbackAvatar = aboutData.avatarUrl;
+  if (!fallbackAvatar) {
+    const ogImg = html.match(/<meta property="og:image" content="([^"]*)">/i);
+    if (ogImg && ogImg[1]) {
+      fallbackAvatar = ogImg[1];
+    } else {
+      const dvm = html.match(/"decoratedAvatarViewModel"[\s\S]*?"avatarViewModel"[\s\S]*?"sources":\s*\[\s*\{\s*"url":\s*"([^"]*)"/);
+      const avRegex = html.match(/"avatar":\s*\{\s*"thumbnails":\s*\[\s*\{\s*"url":\s*"([^"]*)"/);
+      if (dvm && dvm[1]) fallbackAvatar = dvm[1];
+      else if (avRegex && avRegex[1]) fallbackAvatar = avRegex[1];
+    }
+  }
+
   return {
     type: 'channel',
     channelId: '',
     channelTitle: aboutData.channelTitle || 'Channel YouTube',
     channelUrl: targetUrl.replace('/videos', ''),
-    avatarUrl: aboutData.avatarUrl || 'https://www.youtube.com/favicon.ico',
+    avatarUrl: fallbackAvatar || 'https://www.youtube.com/favicon.ico',
     channelCreatedDate: aboutData.channelCreatedDate,
     channelCountry: aboutData.channelCountry,
     channelTotalVideos: aboutData.channelTotalVideos,
