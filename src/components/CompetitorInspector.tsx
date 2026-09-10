@@ -103,7 +103,7 @@ export function CompetitorInspector({
 
   // Export CSV for the table
   const exportToCSV = (videos: ChannelVideoRow[]) => {
-    const headers = ['Judul', 'Tanggal Publish Lokal', 'Durasi', 'Kategori', 'View Count', 'Like Count', 'Comment Count', 'Total Languages', 'Tags', 'Video URL'];
+    const headers = ['Judul', 'Tanggal Publish (WIB)', 'Durasi', 'Kategori', 'View Count', 'Like Count', 'Comment Count', 'Total Languages', 'Tags', 'Video URL'];
     const rows = videos.map((v) => [
       `"${v.title.replace(/"/g, '""')}"`,
       `"${v.publishTimeLocal}"`,
@@ -271,6 +271,7 @@ export function CompetitorInspector({
                   <img
                     src={result.thumbnailUrl}
                     alt={result.title}
+                    referrerPolicy="no-referrer"
                     className="w-full h-full object-cover"
                     onError={(e) => {
                       (e.target as HTMLImageElement).src = `https://i.ytimg.com/vi/${result.videoId}/hqdefault.jpg`;
@@ -411,9 +412,17 @@ export function CompetitorInspector({
           <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-xl">
             <div className="flex flex-col sm:flex-row items-center sm:items-start gap-5 pb-6 border-b border-slate-800">
               <img
-                src={result.avatarUrl}
+                src={result.avatarUrl || 'https://www.youtube.com/favicon.ico'}
                 alt={result.channelTitle}
-                className="w-20 h-20 rounded-full border-2 border-slate-700 object-cover shadow-lg"
+                referrerPolicy="no-referrer"
+                crossOrigin="anonymous"
+                className="w-20 h-20 rounded-full border-2 border-slate-700 object-cover shadow-lg bg-slate-800"
+                onError={(e) => {
+                  const target = e.target as HTMLImageElement;
+                  if (!target.src.includes('ui-avatars.com')) {
+                    target.src = `https://ui-avatars.com/api/?name=${encodeURIComponent(result.channelTitle || 'YT')}&background=0f172a&color=f43f5e&size=160&bold=true`;
+                  }
+                }}
               />
               <div className="flex-1 text-center sm:text-left">
                 <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mb-1">
@@ -474,7 +483,7 @@ export function CompetitorInspector({
                   <tr className="border-b border-slate-800 bg-slate-900/90 text-slate-300 font-bold">
                     <th className="py-3 px-3 w-10 text-center">#</th>
                     <th className="py-3 px-3 min-w-[320px]">Judul</th>
-                    <th className="py-3 px-3 min-w-[150px]">Tanggal Publish Lokal</th>
+                    <th className="py-3 px-3 min-w-[170px]">Tanggal Publish (WIB)</th>
                     <th className="py-3 px-3 min-w-[90px]">Durasi</th>
                     <th className="py-3 px-3 min-w-[90px]">Kategori</th>
                     <th className="py-3 px-3 min-w-[90px]">View Count</th>
@@ -503,20 +512,50 @@ export function CompetitorInspector({
                         <td className="py-2.5 px-3 text-amber-400 whitespace-nowrap">{v.commentCount}</td>
                         <td className="py-2.5 px-3 text-center text-slate-400">{v.totalLanguages}</td>
                         <td className="py-2.5 px-3 text-slate-400">
-                          <div className="line-clamp-2 text-[11px]" title={v.tags}>
-                            {v.tags}
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="line-clamp-2 text-[11px] flex-1" title={v.tags}>
+                              {v.tags}
+                            </div>
+                            {v.tags && v.tags !== '-' && (
+                              <button
+                                onClick={() => handleCopy(v.tags, `tag-${v.videoId}`)}
+                                className="p-1 rounded-md bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors shrink-0 cursor-pointer"
+                                title="Copy Tag Video Ini"
+                              >
+                                {copiedField === `tag-${v.videoId}` ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            )}
                           </div>
                         </td>
                         <td className="py-2.5 px-3 text-center whitespace-nowrap font-sans">
-                          <a
-                            href={v.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white inline-flex items-center justify-center transition-colors"
-                            title="Tonton di YouTube"
-                          >
-                            <Play className="w-3.5 h-3.5 fill-current" />
-                          </a>
+                          <div className="flex items-center justify-center gap-1.5">
+                            {v.tags && v.tags !== '-' && (
+                              <button
+                                onClick={() => handleCopy(v.tags, `tag-${v.videoId}`)}
+                                className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white inline-flex items-center justify-center transition-colors cursor-pointer"
+                                title="Copy Tag Video Ini"
+                              >
+                                {copiedField === `tag-${v.videoId}` ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-400" />
+                                ) : (
+                                  <Copy className="w-3.5 h-3.5" />
+                                )}
+                              </button>
+                            )}
+                            <a
+                              href={v.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="p-1.5 rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white inline-flex items-center justify-center transition-colors"
+                              title="Tonton di YouTube"
+                            >
+                              <Play className="w-3.5 h-3.5 fill-current" />
+                            </a>
+                          </div>
                         </td>
                       </tr>
                     ))
