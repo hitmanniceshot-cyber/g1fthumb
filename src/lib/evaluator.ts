@@ -70,14 +70,61 @@ export interface GlobalScoreResult {
   topActionableTips: string[];
 }
 
-// Power words dalam Bahasa Indonesia & Inggris yang sering memicu CTR tinggi
+// Power words dalam Bahasa Indonesia & Inggris yang sering memicu CTR tinggi (Konten Umum & Musik Semua Genre)
 const POWER_WORDS = [
+  // 1. Umum & Viral (Indo & English)
   'rahasia', 'ternyata', 'terbongkar', 'jangan', 'fakta', 'misteri', 'kenapa', 'alasan', 'sebab', 'apa jadinya',
   'secret', 'revealed', 'exposed', 'never', 'truth', 'why', 'what happens',
   'cara termudah', 'trik', 'tips', 'terbukti', 'wajib', 'sebelum terlambat', 'bahaya', 'kesalahan', 'hindari',
   'how to', 'hack', 'easiest', 'proven', 'warning', 'mistake', 'stop', 'fast',
   'gila', 'syok', 'kaget', 'parah', 'terbaik', 'terburuk', 'tercepat', 'spesial', 'termahal', 'terkaya',
-  'insane', 'shocking', 'best', 'worst', 'ultimate', 'crazy', 'extreme'
+  'insane', 'shocking', 'best', 'worst', 'ultimate', 'crazy', 'extreme',
+
+  // 2. Musik US: Vibe, Mood, Ambience & Night Life
+  'late night', 'night drive', 'night vibe', 'night vibes', 'late night vibes', 'midnight',
+  'vibes', 'vibe', 'mood', 'chill', 'chilling', 'relaxing', 'relax', 'calm', 'peaceful',
+  'nostalgia', 'nostalgic', 'cozy', 'rainy', 'sunset', 'sunrise', 'golden hour', 'summer vibes',
+  'sad hours', 'melancholy', 'dreamy', 'ethereal', 'dark', 'aesthetic', 'deep vibes',
+  'smoke & chill', 'late night drive', 'midnight drive', 'cruising', 'road trip',
+  'study', 'sleep', 'deep focus', 'stress relief', 'meditation', 'healing', 'comfort',
+  'feel good', 'good vibes', 'soul therapy', 'goosebumps', 'masterpiece',
+
+  // 3. Sub-Genre Spesifik User (Blues Rock, Deep House, Afro, Country Rap, Boom Bap, Hip Hop)
+  'blues rock', 'blues', 'delta blues', 'texas blues', 'chicago blues', 'rock blues', 'classic rock',
+  'deep house', 'afro deep house', 'afro house', 'afrobeat', 'afrobeats', 'amapiano', 'tribal house',
+  'melodic house', 'progressive house', 'tech house', 'organic house', 'sunset house',
+  'country rap', 'country hip hop', 'hick hop', 'southern rock', 'outlaw country', 'americana', 'country',
+  'boom bap', '90s boom bap', 'golden age hip hop', 'hip hop', 'hip-hop', 'rap', 'underground rap',
+  'trap', 'lofi hip hop', 'lofi', 'lo-fi', 'chillhop', 'jazz hop', 'old school hip hop', 'conscious rap',
+
+  // 4. Semua Genre Musik Dunia Lainnya (EDM, Rock, Metal, Pop, Jazz, Folk, Classical, Reggae, Latin, RnB, World)
+  // Electronic / Dance
+  'edm', 'house music', 'techno', 'melodic techno', 'hardstyle', 'drum and bass', 'dnb', 'dubstep',
+  'synthwave', 'retrowave', 'vaporwave', 'future bass', 'trance', 'psytrance', 'ambient', 'downtempo', 'garage',
+  // Rock & Metal
+  'rock', 'hard rock', 'psychedelic rock', 'indie rock', 'alternative rock', 'grunge', 'punk rock', 'pop punk',
+  'heavy metal', 'metal', 'death metal', 'black metal', 'thrash metal', 'nu metal', 'metalcore',
+  // Hip Hop, R&B, Soul, Funk
+  'r&b', 'rnb', 'contemporary r&b', 'soul', 'neo soul', 'motown', 'funk', 'disco', 'groove', 'gospel',
+  // Pop & Indie
+  'pop', 'indie pop', 'bedroom pop', 'dream pop', 'electropop', 'hyperpop', 'synthpop', 'acoustic pop',
+  // Jazz & Classical
+  'jazz', 'smooth jazz', 'bossa nova', 'blues jazz', 'bebop', 'classical', 'orchestral', 'cinematic', 'piano',
+  // Country, Folk, Acoustic
+  'bluegrass', 'folk', 'indie folk', 'acoustic', 'fingerstyle', 'celtic',
+  // Reggae & Caribbean
+  'reggae', 'dub', 'roots reggae', 'dancehall', 'ska', 'reggaeton',
+  // Latin & World Music
+  'latin', 'salsa', 'bachata', 'cumbia', 'flamenco', 'bossa', 'k-pop', 'kpop', 'j-pop', 'jpop', 'city pop',
+
+  // 5. High-Impact Sensory & Emotional Music Power Words (ChatGPT Curated)
+  'hypnotic', 'ultimate', 'addictive', 'magnetic', 'powerful', 'soulful', 'euphoric',
+  'massive', 'intense', 'premium', 'irresistible', 'mesmerizing', 'captivating',
+  'immersive', 'seductive', 'emotional', 'atmospheric', 'dreamy', 'exotic', 'mystical',
+  'sensual', 'energetic', 'explosive', 'epic', 'legendary', 'unforgettable', 'deep',
+  'melodic', 'tribal', 'organic', 'soul-stirring', 'soul stirring', 'spellbinding',
+  'enchanting', 'groovy', 'smooth', 'vibrant', 'dynamic', 'powerhouse', 'next-level',
+  'next level', 'elite'
 ];
 
 export function evaluateTitle(title: string): TitleScoreResult {
