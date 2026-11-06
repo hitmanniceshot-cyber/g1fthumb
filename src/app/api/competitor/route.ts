@@ -707,9 +707,9 @@ async function fetchVideoRowDetails(
     } catch {}
   }
 
-  // METODE 3: Fallback ke HTML Watch Page jika tag/like/deskripsi masih belum lengkap
+  // METODE 3: Fallback ke HTML Watch Page jika tag/like/deskripsi masih belum lengkap atau deskripsi terpotong <= 160 karakter
   // Menggunakan User-Agent Googlebot yang tidak pernah diblokir atau diberi bot wall oleh YouTube di server datacenter Vercel
-  if (tagsArray.length === 0 || !videoDesc || likeCount === '-' || publishTimeLocal === '-') {
+  if (tagsArray.length === 0 || !videoDesc || videoDesc.length <= 160 || likeCount === '-' || publishTimeLocal === '-') {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 4000);
@@ -727,7 +727,61 @@ async function fetchVideoRowDetails(
       if (res.ok) {
         const html = await res.text();
 
-        // Deskripsi video fallback
+        // 1. Ekstrak deskripsi video lengkap dari ytInitialPlayerResponse (Full Text, bukan cuma cuplikan 160 karakter meta)
+        const playerStart = html.indexOf('var ytInitialPlayerResponse = {');
+        if (playerStart !== -1) {
+          const jsonStart = playerStart + 'var ytInitialPlayerResponse = '.length;
+          const endIdx = html.indexOf(';</script>', jsonStart);
+          if (endIdx !== -1) {
+            try {
+              const pdata = JSON.parse(html.substring(jsonStart, endIdx));
+              const fullD = pdata?.videoDetails?.shortDescription;
+              if (fullD && fullD.length > (videoDesc ? videoDesc.length : 0)) {
+                videoDesc = fullD;
+              }
+              if (Array.isArray(pdata?.videoDetails?.keywords) && pdata.videoDetails.keywords.length > 0 && tagsArray.length === 0) {
+                tagsArray = pdata.videoDetails.keywords;
+                tagsStr = tagsArray.join(', ');
+              }
+            } catch {}
+          }
+        }
+
+        // 2. Ekstrak dari ytInitialData attributedDescription jika masih belum dapat
+        if (!videoDesc || videoDesc.length <= 160) {
+          const dataStart = html.indexOf('var ytInitialData = {');
+          if (dataStart !== -1) {
+            const jsonStart = dataStart + 'var ytInitialData = '.length;
+            const endIdx = html.indexOf(';</script>', jsonStart);
+            if (endIdx !== -1) {
+              try {
+                const wdata = JSON.parse(html.substring(jsonStart, endIdx));
+                const findKey = (obj: any, targetKey: string): any => {
+                  if (!obj || typeof obj !== 'object') return null;
+                  if (targetKey in obj) return obj[targetKey];
+                  if (Array.isArray(obj)) {
+                    for (const item of obj) {
+                      const f = findKey(item, targetKey);
+                      if (f) return f;
+                    }
+                  } else {
+                    for (const v of Object.values(obj)) {
+                      const f = findKey(v, targetKey);
+                      if (f) return f;
+                    }
+                  }
+                  return null;
+                };
+                const attrDesc = findKey(wdata, 'attributedDescription');
+                if (attrDesc?.content && attrDesc.content.length > (videoDesc ? videoDesc.length : 0)) {
+                  videoDesc = attrDesc.content;
+                }
+              } catch {}
+            }
+          }
+        }
+
+        // 3. Fallback meta description hanya jika JSON parse di atas tidak menemukan deskripsi
         if (!videoDesc) {
           const dm = html.match(/<meta property="og:description" content="([^"]*)">/i) || html.match(/<meta name="description" content="([^"]*)">/i);
           if (dm && dm[1]) videoDesc = dm[1];
