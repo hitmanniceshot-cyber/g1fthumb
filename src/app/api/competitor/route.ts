@@ -38,6 +38,7 @@ export interface ChannelVideoRow {
   totalLanguages: number; // 1
   tags: string; // "blues rock, Rock mon Radio, electr..."
   tagsArray: string[];
+  description?: string; // Deskripsi lengkap video
 }
 
 export interface CompetitorChannelData {
@@ -53,6 +54,8 @@ export interface CompetitorChannelData {
   channelSubscriberCount: string; // "15,8 jt subscriber"
   channelTotalViews: string; // Total view sebenarnya (misal "624.735 x ditonton")
   description: string;
+  channelTags: string; // Tag / keywords channel gabungan string
+  channelTagsArray: string[]; // Tag / keywords channel array
   videos: ChannelVideoRow[];
 }
 
@@ -137,7 +140,13 @@ function parseYouTubeUrl(urlStr: string): { type: 'video' | 'channel' | 'unknown
   }
 }
 
-// Ekstrak data lengkap channel (termasuk Total Video, Total View, Tanggal Bergabung, Lokasi, Subscriber)
+function parseChannelKeywords(raw: string): string[] {
+  if (!raw || typeof raw !== 'string') return [];
+  const matches = raw.match(/"([^"]+)"|(\S+)/g) || [];
+  return matches.map((m) => m.replace(/^"|"$/g, '').trim()).filter(Boolean);
+}
+
+// Ekstrak data lengkap channel (termasuk Total Video, Total View, Tanggal Bergabung, Lokasi, Subscriber, Deskripsi & Tag Channel)
 async function fetchChannelFullMetadata(channelQueryOrUrl: string) {
   let targetUrl = channelQueryOrUrl;
   if (!targetUrl.startsWith('http')) {
@@ -162,6 +171,8 @@ async function fetchChannelFullMetadata(channelQueryOrUrl: string) {
   let channelSubscriberCount = 'Tidak ditampilkan';
   let channelTotalViews = 'Tidak terdeteksi';
   let description = '';
+  let channelTags = '';
+  let channelTagsArray: string[] = [];
 
   try {
     const res = await fetch(aboutUrl, {
@@ -213,6 +224,15 @@ async function fetchChannelFullMetadata(channelQueryOrUrl: string) {
 
       if (data) {
         try {
+          // Channel Description & Keywords dari metadata channelMetadataRenderer
+          const cmr = data?.metadata?.channelMetadataRenderer;
+          if (cmr?.description && !description) {
+            description = cmr.description;
+          }
+          if (cmr?.keywords) {
+            channelTags = cmr.keywords;
+            channelTagsArray = parseChannelKeywords(cmr.keywords);
+          }
 
           // 1. Ekstrak Total Video & Subs dari Header PageHeaderViewModel
           const vm = data?.header?.pageHeaderRenderer?.content?.pageHeaderViewModel;
@@ -287,6 +307,21 @@ async function fetchChannelFullMetadata(channelQueryOrUrl: string) {
       }
 
       // Regex fallback jika belum ketemu
+      if (!channelTags) {
+        const kwMatch = html.match(/"keywords":"([^"]*)"/);
+        if (kwMatch && kwMatch[1]) {
+          channelTags = kwMatch[1];
+          channelTagsArray = parseChannelKeywords(kwMatch[1]);
+        }
+      }
+
+      if (!description) {
+        const descM = html.match(/"description":"([^"]*)"/);
+        if (descM && descM[1]) {
+          description = descM[1].replace(/\\n/g, '\n').replace(/\\"/g, '"');
+        }
+      }
+
       if (channelCreatedDate === 'Tidak terdeteksi') {
         const jm = html.match(/(?:Bergabung|Joined)\s+(pada\s+[0-9]{1,2}\s+[a-zA-Z]+\s+[0-9]{4}|[0-9]{1,2}\s+[a-zA-Z]+\s+[0-9]{4}|\w+\s+[0-9]{1,2},\s+[0-9]{4})/i);
         if (jm) {
@@ -315,6 +350,8 @@ async function fetchChannelFullMetadata(channelQueryOrUrl: string) {
     channelSubscriberCount,
     channelTotalViews,
     description,
+    channelTags,
+    channelTagsArray,
   };
 }
 
@@ -552,6 +589,7 @@ async function fetchVideoRowDetails(
   let commentCount = '-';
   let tagsStr = '-';
   let tagsArray: string[] = [];
+  let videoDesc = '';
 
   // METODE 1: Panggil YouTube Innertube Player API dengan MWEB client (100% Mengembalikan keyword/tags asli video & lolos filter datacenter Vercel)
   try {
@@ -592,6 +630,7 @@ async function fetchVideoRowDetails(
       const micro = pData?.microformat?.playerMicroformatRenderer || {};
 
       if (vd.title) title = vd.title;
+      if (vd.shortDescription) videoDesc = vd.shortDescription;
       if (vd.viewCount) viewCount = Number(vd.viewCount).toLocaleString('id-ID');
       if (vd.lengthSeconds) {
         const s = parseInt(vd.lengthSeconds, 10);
@@ -654,6 +693,7 @@ async function fetchVideoRowDetails(
         const micro = pData?.microformat?.playerMicroformatRenderer || {};
 
         if (!title && vd.title) title = vd.title;
+        if (!videoDesc && vd.shortDescription) videoDesc = vd.shortDescription;
         if (viewCount === '-' && vd.viewCount) viewCount = Number(vd.viewCount).toLocaleString('id-ID');
         if (publishTimeLocal === '-' && micro.publishDate) publishTimeLocal = formatDateTimeLocal(micro.publishDate);
         if (category === 'Music / Umum' && micro.category) category = micro.category;
@@ -667,9 +707,9 @@ async function fetchVideoRowDetails(
     } catch {}
   }
 
-  // METODE 3: Fallback ke HTML Watch Page jika tag/like masih belum lengkap
+  // METODE 3: Fallback ke HTML Watch Page jika tag/like/deskripsi masih belum lengkap
   // Menggunakan User-Agent Googlebot yang tidak pernah diblokir atau diberi bot wall oleh YouTube di server datacenter Vercel
-  if (tagsArray.length === 0 || likeCount === '-' || publishTimeLocal === '-') {
+  if (tagsArray.length === 0 || !videoDesc || likeCount === '-' || publishTimeLocal === '-') {
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 4000);
@@ -686,6 +726,12 @@ async function fetchVideoRowDetails(
 
       if (res.ok) {
         const html = await res.text();
+
+        // Deskripsi video fallback
+        if (!videoDesc) {
+          const dm = html.match(/<meta property="og:description" content="([^"]*)">/i) || html.match(/<meta name="description" content="([^"]*)">/i);
+          if (dm && dm[1]) videoDesc = dm[1];
+        }
 
         // Tags asli dari <meta property="og:video:tag" content="...">
         if (tagsArray.length === 0) {
@@ -771,6 +817,7 @@ async function fetchVideoRowDetails(
     totalLanguages: 1,
     tags: tagsStr,
     tagsArray,
+    description: videoDesc,
   };
 }
 
@@ -956,6 +1003,26 @@ async function fetchChannelWithVideosTable(channelQuery: string): Promise<Compet
     }
   }
 
+  // Fallback keywords dari /videos page jika aboutData.channelTags kosong
+  let fallbackChannelTags = aboutData.channelTags;
+  let fallbackChannelTagsArray = aboutData.channelTagsArray;
+  if (!fallbackChannelTags) {
+    const kwMatch = html.match(/"keywords":"([^"]*)"/);
+    if (kwMatch && kwMatch[1]) {
+      fallbackChannelTags = kwMatch[1];
+      fallbackChannelTagsArray = parseChannelKeywords(kwMatch[1]);
+    }
+  }
+
+  // Fallback description dari /videos page jika aboutData.description kosong
+  let fallbackDescription = aboutData.description;
+  if (!fallbackDescription) {
+    const descMatch = html.match(/<meta property="og:description" content="([^"]*)">/i) || html.match(/<meta name="description" content="([^"]*)">/i);
+    if (descMatch && descMatch[1] && !descMatch[1].includes('Bagikan video Anda')) {
+      fallbackDescription = descMatch[1];
+    }
+  }
+
   return {
     type: 'channel',
     channelId: '',
@@ -967,7 +1034,9 @@ async function fetchChannelWithVideosTable(channelQuery: string): Promise<Compet
     channelTotalVideos: aboutData.channelTotalVideos,
     channelSubscriberCount: aboutData.channelSubscriberCount,
     channelTotalViews: aboutData.channelTotalViews,
-    description: aboutData.description,
+    description: fallbackDescription,
+    channelTags: fallbackChannelTags,
+    channelTagsArray: fallbackChannelTagsArray,
     videos: videoRows,
   };
 }
