@@ -22,7 +22,11 @@ import {
   ShieldCheck,
   Download,
   Table as TableIcon,
-  Play
+  Play,
+  ChevronDown,
+  ChevronUp,
+  Hash,
+  X
 } from 'lucide-react';
 
 interface ChannelVideoRow {
@@ -39,6 +43,7 @@ interface ChannelVideoRow {
   totalLanguages: number;
   tags: string;
   tagsArray: string[];
+  description?: string;
 }
 
 export function CompetitorInspector({
@@ -53,6 +58,11 @@ export function CompetitorInspector({
 
   // Copied states
   const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  // Modal / Drawer state for Video Description
+  const [activeVideoModal, setActiveVideoModal] = useState<ChannelVideoRow | null>(null);
+  // Expand channel description
+  const [showFullChannelDesc, setShowFullChannelDesc] = useState(false);
 
   const handleInspect = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -103,7 +113,7 @@ export function CompetitorInspector({
 
   // Export CSV for the table
   const exportToCSV = (videos: ChannelVideoRow[]) => {
-    const headers = ['Judul', 'Tanggal Publish (WIB)', 'Durasi', 'Kategori', 'View Count', 'Like Count', 'Comment Count', 'Total Languages', 'Tags', 'Video URL'];
+    const headers = ['Judul', 'Tanggal Publish (WIB)', 'Durasi', 'Kategori', 'View Count', 'Like Count', 'Comment Count', 'Total Languages', 'Tags', 'Deskripsi Video', 'Video URL'];
     const rows = videos.map((v) => [
       `"${v.title.replace(/"/g, '""')}"`,
       `"${v.publishTimeLocal}"`,
@@ -114,6 +124,7 @@ export function CompetitorInspector({
       `"${v.commentCount}"`,
       v.totalLanguages,
       `"${v.tags.replace(/"/g, '""')}"`,
+      `"${(v.description || '').replace(/"/g, '""')}"`,
       `"${v.url}"`,
     ]);
 
@@ -452,29 +463,183 @@ export function CompetitorInspector({
               </div>
 
               {result.videos && result.videos.length > 0 && (
-                <button
-                  onClick={() => exportToCSV(result.videos)}
-                  className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 hover:text-white transition-colors flex items-center gap-2 border border-slate-700 self-center sm:self-auto cursor-pointer"
-                >
-                  <Download className="w-4 h-4 text-emerald-400" />
-                  <span>Download Excel/CSV</span>
-                </button>
+                <div className="flex flex-wrap items-center gap-2.5 self-center sm:self-auto">
+                  <button
+                    onClick={() => {
+                      const allTitles = result.videos.map((v: ChannelVideoRow) => v.title).join('\n');
+                      handleCopy(allTitles, 'all-titles');
+                    }}
+                    className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-xs font-semibold text-white shadow-lg shadow-rose-600/20 transition-all flex items-center gap-2 cursor-pointer"
+                    title={`Copy Seluruh Judul Video (${result.videos.length} Judul)`}
+                  >
+                    {copiedField === 'all-titles' ? (
+                      <>
+                        <Check className="w-4 h-4 text-white" />
+                        <span>{result.videos.length} Judul Tersalin!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-4 h-4" />
+                        <span>Copy Semua Judul ({result.videos.length})</span>
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    onClick={() => exportToCSV(result.videos)}
+                    className="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 hover:text-white transition-colors flex items-center gap-2 border border-slate-700 cursor-pointer"
+                  >
+                    <Download className="w-4 h-4 text-emerald-400" />
+                    <span>Download Excel/CSV</span>
+                  </button>
+                </div>
               )}
+            </div>
+
+            {/* Bagian Deskripsi Channel & Tag Channel */}
+            <div className="mt-6 pt-5 grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Box Deskripsi Channel */}
+              <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800/80 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-rose-400 flex items-center gap-1.5">
+                      <FileText className="w-3.5 h-3.5" />
+                      Deskripsi Channel
+                    </span>
+                    {result.description && (
+                      <button
+                        onClick={() => handleCopy(result.description, 'channel-desc')}
+                        className="text-[11px] px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Copy Deskripsi Channel"
+                      >
+                        {copiedField === 'channel-desc' ? (
+                          <>
+                            <Check className="w-3 h-3 text-emerald-400" />
+                            <span className="text-emerald-400">Tersalin</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3 h-3" />
+                            <span>Copy</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+                  <div className={`text-xs text-slate-300 whitespace-pre-line leading-relaxed font-sans ${showFullChannelDesc ? '' : 'line-clamp-4'}`}>
+                    {result.description || (
+                      <span className="text-slate-500 italic">Channel ini tidak memiliki deskripsi profil / about.</span>
+                    )}
+                  </div>
+                </div>
+
+                {result.description && result.description.length > 180 && (
+                  <button
+                    onClick={() => setShowFullChannelDesc(!showFullChannelDesc)}
+                    className="mt-3 text-[11px] font-medium text-rose-400 hover:text-rose-300 flex items-center gap-1 self-start cursor-pointer"
+                  >
+                    {showFullChannelDesc ? (
+                      <>
+                        <span>Tutup Sebagian</span>
+                        <ChevronUp className="w-3.5 h-3.5" />
+                      </>
+                    ) : (
+                      <>
+                        <span>Baca Selengkapnya</span>
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+
+              {/* Box Tag Channel / Channel Keywords */}
+              <div className="p-4 rounded-2xl bg-slate-950/80 border border-slate-800/80 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
+                      <Hash className="w-3.5 h-3.5" />
+                      Tag / Kata Kunci Channel ({result.channelTagsArray ? result.channelTagsArray.length : 0})
+                    </span>
+                    {result.channelTags && (
+                      <button
+                        onClick={() => handleCopy(result.channelTagsArray ? result.channelTagsArray.join(', ') : result.channelTags, 'channel-tags')}
+                        className="text-[11px] px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Copy Seluruh Tag Channel"
+                      >
+                        {copiedField === 'channel-tags' ? (
+                          <>
+                            <Check className="w-3 h-3 text-emerald-400" />
+                            <span className="text-emerald-400">Tersalin</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3 h-3" />
+                            <span>Copy Tag</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+                  </div>
+
+                  {result.channelTagsArray && result.channelTagsArray.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto pr-1">
+                      {result.channelTagsArray.map((t: string, idx: number) => (
+                        <span
+                          key={idx}
+                          className="text-[11px] px-2.5 py-1 rounded-lg bg-slate-800/80 text-amber-300 border border-amber-500/20 font-medium"
+                        >
+                          #{t}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-slate-500 italic">
+                      Channel ini tidak memasang kata kunci channel (channel tags) publik.
+                    </p>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
 
           {/* TABEL VIDEO PERSIS SEPERTI GAMBAR KE 2 & 3 USER */}
           <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-xl">
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
               <div className="flex items-center gap-2">
                 <TableIcon className="w-5 h-5 text-indigo-400" />
                 <h3 className="text-base font-bold text-white">
                   Tabel Analisis Video Channel ({result.videos ? result.videos.length : 0} Video Terbaru)
                 </h3>
               </div>
-              <span className="text-xs text-slate-400 hidden sm:inline">
-                Scroll horizontal untuk melihat seluruh kolom (Views, Likes, Comments, Tags)
-              </span>
+
+              {result.videos && result.videos.length > 0 && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      const allTitles = result.videos.map((v: ChannelVideoRow) => v.title).join('\n');
+                      handleCopy(allTitles, 'all-titles-table');
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-rose-300 hover:text-white border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+                    title={`Copy seluruh ${result.videos.length} judul video`}
+                  >
+                    {copiedField === 'all-titles-table' ? (
+                      <>
+                        <Check className="w-3.5 h-3.5 text-emerald-400" />
+                        <span className="text-emerald-400">{result.videos.length} Judul Tersalin!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy Semua Judul ({result.videos.length})</span>
+                      </>
+                    )}
+                  </button>
+                  <span className="text-xs text-slate-400 hidden lg:inline">
+                    • Scroll horizontal untuk melihat seluruh kolom
+                  </span>
+                </div>
+              )}
             </div>
 
             <div className="overflow-x-auto rounded-2xl border border-slate-800 bg-slate-950">
@@ -491,6 +656,7 @@ export function CompetitorInspector({
                     <th className="py-3 px-3 min-w-[90px]">Comment Count</th>
                     <th className="py-3 px-3 min-w-[70px] text-center">Total Languages</th>
                     <th className="py-3 px-3 min-w-[280px]">Tags</th>
+                    <th className="py-3 px-3 min-w-[120px] text-center">Deskripsi Video</th>
                     <th className="py-3 px-3 text-center min-w-[80px]">Aksi</th>
                   </tr>
                 </thead>
@@ -500,8 +666,21 @@ export function CompetitorInspector({
                       <tr key={v.videoId} className="hover:bg-slate-900/50 transition-colors group">
                         <td className="py-2.5 px-3 text-slate-500 text-center font-sans">{idx + 1}</td>
                         <td className="py-2.5 px-3 font-sans font-medium text-slate-200">
-                          <div className="line-clamp-2" title={v.title}>
-                            {v.title}
+                          <div className="flex items-start justify-between gap-1.5 group/item">
+                            <div className="line-clamp-2 flex-1" title={v.title}>
+                              {v.title}
+                            </div>
+                            <button
+                              onClick={() => handleCopy(v.title, `title-${v.videoId}`)}
+                              className="opacity-0 group-hover/item:opacity-100 p-1 rounded hover:bg-slate-800 text-slate-400 hover:text-white transition-opacity shrink-0 cursor-pointer"
+                              title="Copy Judul Ini"
+                            >
+                              {copiedField === `title-${v.videoId}` ? (
+                                <Check className="w-3.5 h-3.5 text-emerald-400" />
+                              ) : (
+                                <Copy className="w-3.5 h-3.5" />
+                              )}
+                            </button>
                           </div>
                         </td>
                         <td className="py-2.5 px-3 text-slate-300 whitespace-nowrap">{v.publishTimeLocal}</td>
@@ -530,6 +709,21 @@ export function CompetitorInspector({
                               </button>
                             )}
                           </div>
+                        </td>
+                        {/* Kolom Deskripsi Video */}
+                        <td className="py-2.5 px-3 text-center whitespace-nowrap font-sans">
+                          {v.description ? (
+                            <button
+                              onClick={() => setActiveVideoModal(v)}
+                              className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-rose-300 hover:text-rose-200 border border-slate-700/80 text-[11px] font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+                              title="Lihat & Copy Deskripsi Video"
+                            >
+                              <FileText className="w-3 h-3 text-rose-400" />
+                              <span>Lihat Deskripsi</span>
+                            </button>
+                          ) : (
+                            <span className="text-slate-600 text-[11px]">-</span>
+                          )}
                         </td>
                         <td className="py-2.5 px-3 text-center whitespace-nowrap font-sans">
                           <div className="flex items-center justify-center gap-1.5">
@@ -561,13 +755,80 @@ export function CompetitorInspector({
                     ))
                   ) : (
                     <tr>
-                      <td colSpan={11} className="py-8 text-center text-slate-500 font-sans">
+                      <td colSpan={12} className="py-8 text-center text-slate-500 font-sans">
                         Tidak ada video yang ditemukan atau sedang diproses.
                       </td>
                     </tr>
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal / Popup Detail Deskripsi Video */}
+      {activeVideoModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-150">
+          <div className="bg-slate-900 border border-slate-700/80 rounded-3xl max-w-2xl w-full p-6 shadow-2xl relative flex flex-col max-h-[85vh]">
+            {/* Header Modal */}
+            <div className="flex items-start justify-between gap-4 pb-4 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-base font-bold text-white line-clamp-1">{activeVideoModal.title}</h4>
+                  <p className="text-xs text-slate-400">Deskripsi Lengkap Video ({activeVideoModal.videoId})</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setActiveVideoModal(null)}
+                className="p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+                title="Tutup"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Isi Deskripsi Video */}
+            <div className="my-4 overflow-y-auto pr-2 flex-1 space-y-3 font-sans">
+              <div className="p-4 rounded-2xl bg-slate-950 border border-slate-800 text-xs text-slate-200 whitespace-pre-wrap leading-relaxed font-mono">
+                {activeVideoModal.description || 'Tidak ada deskripsi pada video ini.'}
+              </div>
+            </div>
+
+            {/* Footer Modal Action */}
+            <div className="pt-3 border-t border-slate-800 flex items-center justify-between gap-3">
+              <span className="text-[11px] text-slate-500">
+                {activeVideoModal.description ? `${activeVideoModal.description.length} karakter` : '0 karakter'}
+              </span>
+              <div className="flex items-center gap-2">
+                {activeVideoModal.description && (
+                  <button
+                    onClick={() => handleCopy(activeVideoModal.description || '', `modal-desc-${activeVideoModal.videoId}`)}
+                    className="px-4 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-amber-600 hover:from-rose-500 hover:to-amber-500 text-white font-semibold text-xs flex items-center gap-2 shadow-lg shadow-rose-600/20 transition-all cursor-pointer"
+                  >
+                    {copiedField === `modal-desc-${activeVideoModal.videoId}` ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Tersalin!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy Deskripsi</span>
+                      </>
+                    )}
+                  </button>
+                )}
+                <button
+                  onClick={() => setActiveVideoModal(null)}
+                  className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white font-medium text-xs transition-colors cursor-pointer"
+                >
+                  Tutup
+                </button>
+              </div>
             </div>
           </div>
         </div>
